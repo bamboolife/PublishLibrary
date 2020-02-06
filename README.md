@@ -349,6 +349,147 @@ task pushlishLibToLocal(dependsOn: ['build', 'publishPatchLibPublicationToMavenL
 }
 ```
 
+## 将本地的单个jar传至maven中央库私服咋传？经查Gradle API得知如下:
+```gradle
+apply plugin: 'maven-publish'
+def jarDepnd = "xxx:xxx:1.0.1"
+publishing {
+    publications {
+          m1(MavenPublication) {
+               def args= jarDepnd.split(":");
+              //Configure the publication here
+              artifacts =[file("upload/"+args[1]+"-"+args[2]+".jar")]
+//            artifact("upload/velocity-1.6.4-dep.jar") {
+//                  classifier "dep"
+//            }
+              groupId args[0]
+              artifactId args[1]
+              version args[2]
+          }
+    }
+    
+    repositories {
+        maven {
+            // change to point to your repo, e.g. http://my.org/repo
+            url "http://xxx:8081/nexus/content/repositories/xxx/"
+            credentials {
+                username = 'admin'
+                password = 'admin123'
+            }
+        }
+    }
+}
+```
+> 我们只需运行 publishM1PublicationToMavenRepository 命令即可将该包传至maven私服。
+
+那么另一个需求来了,怎么批量把包传上去,经过不断的研究与学习。得如下脚本:
+```gradle
+ext.gradleJarDepends =['aaa:bbb:1.5.0','aa2:ccc:1.5.0']
+//将本地所有依赖jar包上传中中央库
+publishing{
+    publications{
+        gradleJarDepends.each{
+            String[] args = it.split(":");
+            def fileName = "upload/"+args[1]+"-"+args[2]+".jar";
+            def taskId = args[1]+"-"+args[2];
+            println "${fileName}"
+            publishing.publications.create(taskId, MavenPublication) {
+                artifact "${fileName}"
+                groupId args[0]
+                artifactId args[1]
+                version args[2]
+            }
+        }
+    }
+    repositories {
+         maven {
+             //仓库地址
+             url  "http://xxx:8081/nexus/content/repositories/xxx/"
+             credentials {
+                 username = "admin"  //发布到仓库用户名
+                 password = "admin123"  //发布到仓库地址
+             }
+         }
+     }
+ }
+```
+
+手动要在 gradleJarDepends 数组中添加包的group, name ,version好麻烦！！!
+
+怎么把本地工程依赖的包一次性传上去呢？(这种应用场景是某次配置管理员把我们的maven私服不小心删掉了，然后我们本地gradle cache中还有之前的所有包)
+
+这时候我们可以写个脚本把本地工程所依赖的所有包都拷贝到指定目录，然后打印出依赖数组就好了,如下脚本:
+```gradle
+//拷贝工程里的所有依赖到allLibs下面
+task copyAllDependencies(type: Copy) {
+     group "copy jar"
+     description "拷贝工程里的所有依赖到allLibs下面"
+     //referring to the 'compile' configuration
+     from configurations.compile
+     into 'allLibs'
+}
+ 
+//工程中所有gradle jar依赖信息
+ext.gradleJarDepends =[]
+ 
+//遍历所有依赖的jar包信息打印到控制台
+task printDeclaredDependenciesJar(dependsOn: copyAllDependencies) {
+    group "iterate declared dependencies"
+    description "遍历工程中所有依赖的jar包信息上传至maven库"
+    doLast {
+        gradleJarDepends = [];
+        configurations.runtime.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+            def id = artifact.moduleVersion.id
+            //println "group: ${id.group}, name: ${id.name}, version: ${id.version} ,type:${artifact.type},extension:${artifact.extension}" 
+            if(!"${id.group}".startsWith("CAP")){
+                gradleJarDepends.add("${id}")
+            }
+        }
+        println "总共:" + gradleJarDepends.size + "个"
+        def sb =new StringBuffer();
+        sb.append("[")
+        for (int i = 0; i <gradleJarDepends.size; i++) {
+           if(i>0){
+              sb.append(",");
+           }
+           sb.append("\""+ gradleJarDepends.get(i) + "\"");
+        }
+        sb.append("]")
+        println sb
+    }
+}
+ 
+//将本地所有依赖jar包上传中中央库
+publishing{
+    publications{
+        gradleJarDepends.each{
+            String[] args = it.split(":");
+            def fileName = "allLibs/"+args[1]+"-"+args[2]+".jar";
+            def taskId = args[1]+"-"+args[2];
+            println "${fileName}"
+            publishing.publications.create(taskId, MavenPublication) {
+                artifact "${fileName}"
+                groupId args[0]
+                artifactId args[1]
+                version args[2]
+            }
+        }
+    }
+    repositories {
+         maven {
+             //仓库地址
+             url  "http://xxx:8081/nexus/content/repositories/xxx/"
+             credentials {
+                 username = "admin"  //发布到仓库用户名
+                 password = "admin123"  //发布到仓库地址
+             }
+         }
+     }
+ }
+
+```
+这时我们只用先运行 printDeclaredDependenciesJar 命令将所有依赖的内容打印到控制台,然后粘贴到 gradleJarDepends里面去,然后运行时publish命令就可以一次性将本地的所有包都传到新的maven私物库了。
+
 ## 总结
 
 将项目模块(Android Library、Java Library以及Groovy Plugins等等)构建、打包发到Maven仓库(包括本地的Maven仓库)是一件很有意义的事情。对于公司来说，方便多个小组之间的调用、以及维护管理，同时也使代码看起来不会显的过于臃肿，也避免了一些网络不好的情况(公司内网还是相对快一点)。这篇文件介绍的’maven-publish’插件是一个已经可以直接使用的插件，个人觉得目前这个插件的主要作用是将构建内容发布在本地(.m2目录)。这样对于修改一些开源的框架还是蛮有作用的，以及将项目中的Library模块先发布在本地然后再依赖调用，也可以减少打包的时间。
