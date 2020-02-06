@@ -54,7 +54,7 @@ publishing {
 }
 ```
 > 什么意思呢？上面一句from components.java代表了使用默认的配置，从上表可以看出会生成jar文件，同时需要运行时的一些依赖。
-
+[官网MavenPublication](https://docs.gradle.org/current/dsl/org.gradle.api.publish.maven.MavenPublication.html)
 #### 2. 发布一个自定义构建内容
 
 可以通过配置artifact明确的指定需要生成的内容。通常会提供原始的文件或者AbstractArchiveTask对应的实例(例如：Jar，Zip等等)。
