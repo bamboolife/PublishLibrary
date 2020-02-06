@@ -258,7 +258,7 @@ model {
 BUILD SUCCESSFUL
 
 Total time: 1 secs
-
+```
 ## 打包android library到本地的例子
 ```gradle
 // android-artifacts.gradle
